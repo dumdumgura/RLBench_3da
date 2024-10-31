@@ -14,7 +14,6 @@ from rlbench.backend.utils import image_to_float_array, rgb_handles_to_mask
 from rlbench.demo import Demo
 from rlbench.observation_config import ObservationConfig
 
-
 class InvalidTaskName(Exception):
     pass
 
@@ -49,11 +48,22 @@ def get_stored_demos(amount: int, image_paths: bool, dataset_root: str,
         raise RuntimeError("Can't find the demos for %s at: %s" % (
             task_name, task_root))
 
-    # Sample an amount of examples for the variation of this task
-    examples_path = join(
-        task_root, VARIATIONS_FOLDER % variation_number,
-        EPISODES_FOLDER)
-    examples = listdir(examples_path)
+    if variation_number == -1:
+        # All variations
+        examples_path = join(
+            task_root, VARIATIONS_ALL_FOLDER,
+            EPISODES_FOLDER)
+        examples = listdir(examples_path)
+    else:
+        # Sample an amount of examples for the variation of this task
+        examples_path = join(
+            task_root, VARIATIONS_FOLDER % variation_number,
+            EPISODES_FOLDER)
+        examples = listdir(examples_path)
+
+    # hack: ignore .DS_Store files from macOS zips
+    examples = [e for e in examples if '.DS_Store' not in e]
+
     if amount == -1:
         amount = len(examples)
     if amount > len(examples):
@@ -70,21 +80,51 @@ def get_stored_demos(amount: int, image_paths: bool, dataset_root: str,
     demos = []
     for example in selected_examples:
         example_path = join(examples_path, example)
+        #
         with open(join(example_path, LOW_DIM_PICKLE), 'rb') as f:
             obs = pickle.load(f)
+
+        ####### read in chain of task description
+        cof_desc_f = join(example_path, 'chain_of_task_description.pkl')
+        if exists(cof_desc_f):
+            with open(cof_desc_f, 'rb') as f:
+                cof_desc = pickle.load(f)
+        else:
+            cof_desc = ["unknown chain of task description"]
+
+        #######
+
+
+        if variation_number == -1:
+            with open(join(example_path, VARIATION_NUMBER), 'rb') as f:
+                obs.variation_number = pickle.load(f)
+        else:
+            obs.variation_number = variation_number
+
+        # language description
+        episode_descriptions_f = join(example_path, VARIATION_DESCRIPTIONS)
+        if exists(episode_descriptions_f):
+            with open(episode_descriptions_f, 'rb') as f:
+                descriptions = pickle.load(f)
+        else:
+            descriptions = ["unknown task description"]
 
         l_sh_rgb_f = join(example_path, LEFT_SHOULDER_RGB_FOLDER)
         l_sh_depth_f = join(example_path, LEFT_SHOULDER_DEPTH_FOLDER)
         l_sh_mask_f = join(example_path, LEFT_SHOULDER_MASK_FOLDER)
+
         r_sh_rgb_f = join(example_path, RIGHT_SHOULDER_RGB_FOLDER)
         r_sh_depth_f = join(example_path, RIGHT_SHOULDER_DEPTH_FOLDER)
         r_sh_mask_f = join(example_path, RIGHT_SHOULDER_MASK_FOLDER)
+        
         oh_rgb_f = join(example_path, OVERHEAD_RGB_FOLDER)
         oh_depth_f = join(example_path, OVERHEAD_DEPTH_FOLDER)
         oh_mask_f = join(example_path, OVERHEAD_MASK_FOLDER)
+        
         wrist_rgb_f = join(example_path, WRIST_RGB_FOLDER)
         wrist_depth_f = join(example_path, WRIST_DEPTH_FOLDER)
         wrist_mask_f = join(example_path, WRIST_MASK_FOLDER)
+        
         front_rgb_f = join(example_path, FRONT_RGB_FOLDER)
         front_depth_f = join(example_path, FRONT_DEPTH_FOLDER)
         front_mask_f = join(example_path, FRONT_MASK_FOLDER)
@@ -100,6 +140,9 @@ def get_stored_demos(amount: int, image_paths: bool, dataset_root: str,
             raise RuntimeError('Broken dataset assumption')
 
         for i in range(num_steps):
+            # descriptions
+            obs[i].misc['descriptions'] = descriptions
+            obs[i].misc['chain_of_task_description'] = cof_desc
             si = IMAGE_FORMAT % i
             if obs_config.left_shoulder_camera.rgb:
                 obs[i].left_shoulder_rgb = join(l_sh_rgb_f, si)

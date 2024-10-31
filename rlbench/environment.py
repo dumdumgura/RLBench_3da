@@ -1,12 +1,11 @@
 import importlib
-from functools import partial
 from os.path import exists, dirname, abspath, join
 from typing import Type, List
+import pickle
 
 from pyrep import PyRep
 from pyrep.objects import VisionSensor
 from pyrep.robots.arms.panda import Panda
-
 from rlbench import utils
 from rlbench.action_modes.action_mode import ActionMode
 from rlbench.backend.const import *
@@ -38,10 +37,7 @@ class Environment(object):
                  frequency: int = 1,
                  visual_randomization_config: VisualRandomizationConfig = None,
                  dynamics_randomization_config: DynamicsRandomizationConfig = None,
-                 attach_grasped_objects: bool = True,
-                 shaped_rewards: bool = False,
-                 arm_max_velocity: float = 1.0,
-                 arm_max_acceleration: float = 4.0,
+                 attach_grasped_objects: bool = True
                  ):
 
         self._dataset_root = dataset_root
@@ -56,9 +52,6 @@ class Environment(object):
         self._visual_randomization_config = visual_randomization_config
         self._dynamics_randomization_config = dynamics_randomization_config
         self._attach_grasped_objects = attach_grasped_objects
-        self._shaped_rewards = shaped_rewards
-        self._arm_max_velocity = arm_max_velocity
-        self._arm_max_acceleration = arm_max_acceleration
 
         if robot_setup not in SUPPORTED_ROBOTS.keys():
             raise ValueError('robot_configuration must be one of %s' %
@@ -102,10 +95,6 @@ class Environment(object):
 
         arm_class, gripper_class, _ = SUPPORTED_ROBOTS[
             self._robot_setup]
-        arm_class = partial(
-            arm_class,
-            max_velocity=self._arm_max_velocity,
-            max_acceleration=self._arm_max_acceleration)
 
         # We assume the panda is already loaded in the scene.
         if self._robot_setup != 'panda':
@@ -150,8 +139,7 @@ class Environment(object):
         return TaskEnvironment(
             self._pyrep, self._robot, self._scene, task,
             self._action_mode, self._dataset_root, self._obs_config,
-            self._static_positions, self._attach_grasped_objects,
-            self._shaped_rewards)
+            self._static_positions, self._attach_grasped_objects)
 
     @property
     def action_shape(self):
@@ -169,6 +157,19 @@ class Environment(object):
             amount, image_paths, self._dataset_root, variation_number,
             task_name, self._obs_config, random_selection, from_episode_number)
         return demos
+
+    def get_task_descriptions_with_episode(self, task_name: str,
+                                           episode_number: int) -> List[str]:
+        episode_description_pkl_file = join(self._dataset_root,
+                                            f'{task_name}',
+                                            VARIATIONS_ALL_FOLDER,
+                                            EPISODES_FOLDER,
+                                            EPISODE_FOLDER % episode_number,
+                                            VARIATION_DESCRIPTIONS)
+        with open(episode_description_pkl_file, 'rb') as f:
+            episode_description = pickle.load(f)
+
+        return episode_description
 
     def get_scene_data(self) -> dict:
         """Get the data of various scene/camera information.

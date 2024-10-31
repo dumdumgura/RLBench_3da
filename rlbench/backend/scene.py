@@ -60,6 +60,8 @@ class Scene(object):
         self._initial_robot_state = (robot.arm.get_configuration_tree(),
                                      robot.gripper.get_configuration_tree())
 
+        self._ignore_collisions_for_current_waypoint = False
+
         # Set camera properties from observation config
         self._set_camera_properties()
 
@@ -77,7 +79,6 @@ class Scene(object):
 
         self._robot_shapes = self.robot.arm.get_objects_in_tree(
             object_type=ObjectType.SHAPE)
-        self._joint_position_action = None
 
     def load(self, task: Task) -> None:
         """Loads the task and positions at the centre of the workspace.
@@ -112,7 +113,7 @@ class Scene(object):
         self._variation_index = 0
 
     def init_episode(self, index: int, randomly_place: bool=True,
-                     max_attempts: int = 5, place_demo: bool = False) -> List[str]:
+                     max_attempts: int = 5) -> List[str]:
         """Calls the task init_episode and puts randomly in the workspace.
         """
 
@@ -122,9 +123,9 @@ class Scene(object):
             self.init_task()
 
         # Try a few times to init and place in the workspace
-        self._attempts = 0
+        attempts = 0
         descriptions = None
-        while self._attempts < max_attempts:
+        while attempts < max_attempts:
             descriptions = self.task.init_episode(index)
             try:
                 if (randomly_place and
@@ -132,17 +133,13 @@ class Scene(object):
                     self._place_task()
                     if self.robot.arm.check_arm_collision():
                         raise BoundaryError()
-                if not place_demo:
-                    self.task.validate()
-                    break
-                else:
-                    # Placing demo, run the number of attempts for correct demo reset
-                    self._attempts += 1
+                self.task.validate()
+                break
             except (BoundaryError, WaypointError) as e:
                 self.task.cleanup_()
                 self.task.restore_state(self._initial_task_state)
-                self._attempts += 1
-                if self._attempts >= max_attempts:
+                attempts += 1
+                if attempts >= max_attempts:
                     raise e
 
         # Let objects come to rest
@@ -290,7 +287,7 @@ class Scene(object):
             joint_forces=(joint_forces
                           if self._obs_config.joint_forces else None),
             gripper_open=(
-                (1.0 if self.robot.gripper.get_open_amount()[0] > 0.9 else 0.0)
+                (1.0 if self.robot.gripper.get_open_amount()[0] > 0.95 else 0.0) # Changed from 0.9 to 0.95 because objects, the gripper does not close completely
                 if self._obs_config.gripper_open else None),
             gripper_pose=(
                 np.array(tip.get_pose())
@@ -307,6 +304,9 @@ class Scene(object):
             task_low_dim_state=(
                 self.task.get_low_dim_state() if
                 self._obs_config.task_low_dim_state else None),
+            ignore_collisions=(
+                np.array((1.0 if self._ignore_collisions_for_current_waypoint else 0.0))
+                if self._obs_config.record_ignore_collisions else None),
             misc=self._get_misc())
         obs = self.task.decorate_observation(obs)
         return obs
@@ -340,12 +340,12 @@ class Scene(object):
         demo = []
         if record:
             self.pyrep.step()  # Need this here or get_force doesn't work...
-            self._joint_position_action = None
-            gripper_open = 1.0 if self.robot.gripper.get_open_amount()[0] > 0.9 else 0.0
             demo.append(self.get_observation())
         while True:
             success = False
+            self._ignore_collisions_for_current_waypoint = False
             for i, point in enumerate(waypoints):
+                self._ignore_collisions_for_current_waypoint = point._ignore_collisions
                 point.start_of_path()
                 if point.skip:
                     continue
@@ -371,7 +371,6 @@ class Scene(object):
                 while not done:
                     done = path.step()
                     self.step()
-                    self._joint_position_action = np.append(path.get_executed_joint_position_action(), gripper_open)
                     self._demo_record_step(demo, record, callable_each_step)
                     success, term = self.task.success()
 
@@ -390,10 +389,9 @@ class Scene(object):
                         if not contains_param:
                             done = False
                             while not done:
-                                gripper_open = 1.0
-                                done = gripper.actuate(gripper_open, 0.04)
-                                self.step()
-                                self._joint_position_action = np.append(path.get_executed_joint_position_action(), gripper_open)
+                                done = gripper.actuate(1.0, 0.04)
+                                self.pyrep.step()
+                                self.task.step()
                                 if self._obs_config.record_gripper_closing:
                                     self._demo_record_step(
                                         demo, record, callable_each_step)
@@ -403,10 +401,9 @@ class Scene(object):
                         if not contains_param:
                             done = False
                             while not done:
-                                gripper_open = 0.0
-                                done = gripper.actuate(gripper_open, 0.04)
-                                self.step()
-                                self._joint_position_action = np.append(path.get_executed_joint_position_action(), gripper_open)
+                                done = gripper.actuate(0.0, 0.04)
+                                self.pyrep.step()
+                                self.task.step()
                                 if self._obs_config.record_gripper_closing:
                                     self._demo_record_step(
                                         demo, record, callable_each_step)
@@ -416,10 +413,9 @@ class Scene(object):
                         num = float(rest[:rest.index(')')])
                         done = False
                         while not done:
-                            gripper_open = num
-                            done = gripper.actuate(gripper_open, 0.04)
-                            self.step()
-                            self._joint_position_action = np.append(path.get_executed_joint_position_action(), gripper_open)
+                            done = gripper.actuate(num, 0.04)
+                            self.pyrep.step()
+                            self.task.step()
                             if self._obs_config.record_gripper_closing:
                                 self._demo_record_step(
                                     demo, record, callable_each_step)
@@ -437,8 +433,8 @@ class Scene(object):
         # (e.g. ball rowling to goal)
         if not success:
             for _ in range(10):
-                self.step()
-                self._joint_position_action = np.append(path.get_executed_joint_position_action(), gripper_open)
+                self.pyrep.step()
+                self.task.step()
                 self._demo_record_step(demo, record, callable_each_step)
                 success, term = self.task.success()
                 if success:
@@ -448,9 +444,7 @@ class Scene(object):
         if not success:
             raise DemoError('Demo was completed, but was not successful.',
                             self.task)
-        processed_demo = Demo(demo)
-        processed_demo.num_reset_attempts = self._attempts + 1
-        return processed_demo
+        return Demo(demo)
 
     def get_observation_config(self) -> ObservationConfig:
         return self._obs_config
@@ -552,10 +546,4 @@ class Scene(object):
         misc.update(_get_cam_data(self._cam_overhead, 'overhead_camera'))
         misc.update(_get_cam_data(self._cam_front, 'front_camera'))
         misc.update(_get_cam_data(self._cam_wrist, 'wrist_camera'))
-        misc.update({"variation_index": self._variation_index})
-        if self._joint_position_action is not None:
-            # Store the actual requested joint positions during demo collection
-            misc.update({"joint_position_action": self._joint_position_action})
-        joint_poses = [j.get_pose() for j in self.robot.arm.joints]
-        misc.update({'joint_poses': joint_poses})
         return misc

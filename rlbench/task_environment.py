@@ -31,9 +31,7 @@ class TaskEnvironment(object):
                  dataset_root: str,
                  obs_config: ObservationConfig,
                  static_positions: bool = False,
-                 attach_grasped_objects: bool = True,
-                 shaped_rewards: bool = False
-                 ):
+                 attach_grasped_objects: bool = True):
         self._pyrep = pyrep
         self._robot = robot
         self._scene = scene
@@ -44,7 +42,6 @@ class TaskEnvironment(object):
         self._obs_config = obs_config
         self._static_positions = static_positions
         self._attach_grasped_objects = attach_grasped_objects
-        self._shaped_rewards = shaped_rewards
         self._reset_called = False
         self._prev_ee_velocity = None
         self._enable_path_observations = False
@@ -72,13 +69,12 @@ class TaskEnvironment(object):
     def variation_count(self) -> int:
         return self._task.variation_count()
 
-    def reset(self, demo = None) -> (List[str], Observation):
+    def reset(self) -> (List[str], Observation):
         self._scene.reset()
         try:
-            place_demo = demo != None and hasattr(demo, 'num_reset_attempts') and demo.num_reset_attempts != None
             desc = self._scene.init_episode(
-                self._variation_number, max_attempts=_MAX_RESET_ATTEMPTS if not place_demo else demo.num_reset_attempts,
-                randomly_place=not self._static_positions, place_demo=place_demo)
+                self._variation_number, max_attempts=_MAX_RESET_ATTEMPTS,
+                randomly_place=not self._static_positions)
         except (BoundaryError, WaypointError) as e:
             raise TaskEnvironmentError(
                 'Could not place the task %s in the scene. This should not '
@@ -88,6 +84,9 @@ class TaskEnvironment(object):
         self._reset_called = True
         # Returns a list of descriptions and the first observation
         return desc, self._scene.get_observation()
+
+    def get_task_descriptions(self) -> List[str]:
+        return self._scene.task.init_episode(self._variation_number)
 
     def get_observation(self) -> Observation:
         return self._scene.get_observation()
@@ -99,13 +98,8 @@ class TaskEnvironment(object):
                 "Call 'reset' before calling 'step' on a task.")
         self._action_mode.action(self._scene, action)
         success, terminate = self._task.success()
-        reward = float(success)
-        if self._shaped_rewards:
-            reward = self._task.reward()
-            if reward is None:
-                raise RuntimeError(
-                    'User requested shaped rewards, but task %s does not have '
-                    'a defined reward() function.' % self._task.get_name())
+        task_reward = self._task.reward()
+        reward = float(success) if task_reward is None else task_reward
         return self._scene.get_observation(), reward, terminate
 
     def get_demos(self, amount: int, live_demos: bool = False,
@@ -156,7 +150,7 @@ class TaskEnvironment(object):
                     break
                 except Exception as e:
                     attempts -= 1
-                    logging.info('Bad demo. ' + str(e))
+                    logging.info('Bad demo. ' + str(e) + ' Attempts left: ' + str(attempts))
             if attempts <= 0:
                 raise RuntimeError(
                     'Could not collect demos. Maybe a problem with the task?')
@@ -164,6 +158,4 @@ class TaskEnvironment(object):
 
     def reset_to_demo(self, demo: Demo) -> (List[str], Observation):
         demo.restore_state()
-        variation_index = demo._observations[0].misc["variation_index"]
-        self.set_variation(variation_index)
-        return self.reset(demo)
+        return self.reset()

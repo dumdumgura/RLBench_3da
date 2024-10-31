@@ -2,6 +2,16 @@
 
 ![task grid image missing](readme_files/task_grid.png)
 
+## Modifications
+ This is my fork of RLBench. Modifications include:
+- 6 new tasks, bug fixes, and extensions of existing tasks. See Appendix A in the [paper](https://peract.github.io/) for details.
+- Data generation also records if `ignore_collisions` was used with a waypoint for motion-planning. 
+- `data_generator.py` supports an "all_variations" setting that samples from all possible task variations. 
+
+I branched off `master` in Feb 2022, so this fork is not up to date with the latest changes in the official repo.
+
+## RLBench
+
 **RLBench** is an ambitious large-scale benchmark and learning environment 
 designed to facilitate research in a number of vision-guided manipulation
 research areas, including: reinforcement learning, imitation learning,
@@ -29,112 +39,75 @@ few-shot learning. [Click here for website and paper.](https://sites.google.com/
 
 ## Announcements
 
-### 11 May 2022
+### 28 September, 2021
 
-- Shaped rewards added for: **reach_target** and **take_lid_off_saucepan**. Pass `shaped_rewards=True` to `Environement` class
+- **Version 1.2.0 is currently under development!** Note: This release will cause code-breaking API changes. Changes include:
+  - Improved API for action modes; custom action modes now much easier.
 
-### 18 February 2022
-
-- **Version 1.2.0 is live!** Note: This release will cause code-breaking API changes for action modes.
-
-### 1 July 2021
+### 1 July, 2021
 
 - New instructions on headless GPU rendering [here](#running-headless)!
 
-### 8 September 2020
+### 8 September, 2020
 
 - New tutorial series on task creation [here](https://www.youtube.com/watch?v=bKaK_9O3v7Y&list=PLsffAlO5lBTRiBwnkw2-x0U7t6TrNCkfc)!
 
-### 1 April 2020
+### 1 April, 2020
 
 - We added a Discord channel to allow the RLBench community to help one another. Click the Discord badge above.
 
-### 28 January 2020
+### 28 January, 2020
 
 - RLBench has been accepted to RA-L with presentation at ICRA!
 - Ability to easily swap out arms added. [See here](#swapping-arms).
 
-### 17 December 2019
+### 17 December, 2019
 
 - Gym is now supported!
 
 
 ## Install
 
-RLBench is built around CoppeliaSim v4.1.0 and [PyRep](https://github.com/stepjam/PyRep).
+RLBench is built around PyRep and V-REP. First head to the 
+[PyRep github](https://github.com/stepjam/PyRep) page and install.
 
-First, install CoppeliaSim:
+**If you previously had PyRep installed, you will need to update your installation!**
 
-```bash
-# set env variables
-export COPPELIASIM_ROOT=${HOME}/CoppeliaSim
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$COPPELIASIM_ROOT
-export QT_QPA_PLATFORM_PLUGIN_PATH=$COPPELIASIM_ROOT
-
-wget https://downloads.coppeliarobotics.com/V4_1_0/CoppeliaSim_Edu_V4_1_0_Ubuntu20_04.tar.xz
-mkdir -p $COPPELIASIM_ROOT && tar -xf CoppeliaSim_Edu_V4_1_0_Ubuntu20_04.tar.xz -C $COPPELIASIM_ROOT --strip-components 1
-rm -rf CoppeliaSim_Edu_V4_1_0_Ubuntu20_04.tar.xz
-```
-
-To install the RLBench python package:
+Hopefully you have now installed PyRep and have run one of the PyRep examples.
+Now lets install RLBench:
 
 ```bash
-pip install git+https://github.com/stepjam/RLBench.git
+pip install -r requirements.txt
+python setup.py develop
 ```
 
 And that's it!
 
 ## Running Headless
 
-If you are running on a machine without display (i.e. Cloud VMs, compute clusters),
-you can refer to the following guide to run RLBench headlessly with rendering.
-
-### Initial setup
-
-First, configure your X config. This should only be done once to set up.
-
+You can run RLBench headlessly with VirtualGL. VirtualGL is an open source toolkit that gives any Unix or Linux remote display software the ability to run OpenGL applications **with full 3D hardware acceleration**.
+First insure that you have the nVidia proprietary driver installed. I.e. you should get an output when running `nvidia-smi`. Now run the following commands:
 ```bash
+sudo apt-get install xorg libxcb-randr0-dev libxrender-dev libxkbcommon-dev libxkbcommon-x11-0 libavcodec-dev libavformat-dev libswscale-dev
 sudo nvidia-xconfig -a --use-display-device=None --virtual=1280x1024
-echo -e 'Section "ServerFlags"\n\tOption "MaxClients" "2048"\nEndSection\n' \
-    | sudo tee /etc/X11/xorg.conf.d/99-maxclients.conf
+# Install VirtualGL
+wget https://sourceforge.net/projects/virtualgl/files/2.5.2/virtualgl_2.5.2_amd64.deb/download -O virtualgl_2.5.2_amd64.deb
+sudo dpkg -i virtualgl*.deb
+rm virtualgl*.deb
 ```
-
-Leave out `--use-display-device=None` if the GPU is headless, i.e. if it has no display outputs.
-
-### Running X
-
-Then, whenever you want to run RLBench, spin up X.
-
+You will now need to reboot, and then start the X server:
 ```bash
-# nohup and disown is important for the X server to keep running in the background
-sudo nohup X :99 & disown
+sudo reboot
+nohup sudo X &
 ```
-
-Test if your display works using glxgears.
-
+Now we are good to go! To render the application with the first GPU, you can do the following:
 ```bash
-DISPLAY=:99 glxgears
+export DISPLAY=:0.0
+python my_pyrep_app.py
 ```
+To render with the second GPU, you will insetad set display as: `export DISPLAY=:0.1`, and so on.
 
-If you have multiple GPUs, you can select your GPU by doing the following.
-
-```bash
-DISPLAY=:99.<gpu_id> glxgears
-```
-
-### Running X without sudo
-
-To spin up X with non-sudo users, edit file '/etc/X11/Xwrapper.config' and replace line:
-
-```
-allowed_users=console
-```
-with lines:
-```
-allowed_users=anybody
-needs_root_rights=yes
-```
-If the file does not exist already, you can create it.
+**Acknowledgement**: Special thanks to Boyuan Chen (UC Berkeley) for bringing VirtualGL to my attention!
 
 ## Getting Started
 
@@ -309,7 +282,7 @@ the observation mode: 'state' or 'vision'.
 
 ```python
 import gym
-import rlbench
+import rlbench.gym
 
 env = gym.make('reach_target-state-v0')
 # Alternatively, for vision:
